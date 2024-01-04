@@ -90,7 +90,7 @@ def getGTFSAttributes():
     tomorrow_select = f"calendar.{tomorrow_name} AS tomorrow,"
     tomorrow_where = f"OR calendar.{tomorrow_name} = 1"
     tomorrow_order = f"calendar.{tomorrow_name} DESC,"
-    where_stop_names = " OR ".join(' stop_name like "' + item + '"' for item in STOP_NAMES)
+    where_stop_names = " OR ".join(' stop_name = "' + item + '"' for item in STOP_NAMES)
     sql_query = f"""
                  SELECT DISTINCT trips.route_id, trips.direction_id,
                                  stops.stop_id, stops.stop_name, stop_lat, stop_lon, 
@@ -113,6 +113,7 @@ def getGTFSAttributes():
     result = pygtfs.engine.connect().execute(
         text(sql_query)
     )
+
     """
         {'route_id': '42', 'direction_id': 1, 'trip_headsign': 'GARE DU MIDI', 
         'stop_id': '1414', 'stop_name': 'FOREST CENTRE', 'stop_lat': 50.812012, 
@@ -157,36 +158,40 @@ def getSTIBAttributes():
     waiting_times = passing_times["waiting_times"]
     routes = asyncio.run(STIB.get_routes_by_lines(lines_by_stops['lines']))
     attributes = {}
+
     if len(routes) == 0:
-        print(f"routes empty, aborting")
+        print("Routes are empty, aborting")
         return attributes
+
     for stop_id in stop_ids["stop_ids"]:
         stop_id_num = str(''.join(i for i in str(stop_id) if i.isdigit())) 
         if stop_id_num in waiting_times:
-            print(waiting_times[stop_id_num])
             for idr, row in waiting_times[stop_id_num].items():
-                print(row)
                 row['stop_ids'] = []
-                row['line_id'] = row['lineid']
-                row["stop_id"] = row['pointid']
-                row["stop_name"] = stop_ids["stop_fields"][stop_id_num]["stop_name"]
-                row["stop_lat"] = stop_ids["stop_fields"][stop_id_num]["stop_coordinates"]["lat"]
-                row["stop_lon"] = stop_ids["stop_fields"][stop_id_num]["stop_coordinates"]["lon"]      
-                destination = str(row['pointid'])
-                if row["line_id"] in routes:
+                row['line_id'] = row.get('lineid', 'Unknown')
+                row["stop_id"] = row.get('pointid', 'Unknown')
+                row["stop_name"] = stop_ids["stop_fields"][stop_id_num].get("stop_name", 'Unknown')
+                row["stop_lat"] = stop_ids["stop_fields"][stop_id_num]["stop_coordinates"].get("lat", 0.0)
+                row["stop_lon"] = stop_ids["stop_fields"][stop_id_num]["stop_coordinates"].get("lon", 0.0)
+
+                destination = str(row.get('pointid', 'Unknown'))
+                
+                if "line_id" in row and row["line_id"] in routes:
                     row["route_long_name"] = routes[row["line_id"]]["route_long_name"]
                     row["route_type"] = routes[row["line_id"]]["route_type"].upper()
                     row["route_color"] = routes[row["line_id"]]["route_color"]
                     row["route_id"] = routes[row["line_id"]]["route_id"]
                 else:
-                    print(f"Route for {row['line_id']} not found")
+                    print(f"Route for {row.get('line_id', 'Unknown')} not found")
                     print(json.dumps(row))
                     print(json.dumps(routes))
                     print(json.dumps(lines_by_stops))
-                name = f'STIB {row["stop_name"]} - {row["route_type"]} {row["line_id"]} - {destination}'
+
+                name = f'STIB {row["stop_name"]} - {row.get("route_type", "Unknown")} {row["line_id"]} - {destination}'
                 row["direction_id"] = destination
-                row["route_short_name"] = row["line_id"]
+                row["route_short_name"] = row.get("line_id", "Unknown")
                 row["route_text_color"] = "000000"
+
                 if name in attributes:
                     pointid = ''.join(i for i in str(row["stop_id"]) if i.isdigit()) 
                     attributes[name]['stop_ids'].append(pointid)
@@ -194,10 +199,12 @@ def getSTIBAttributes():
                     pointid = ''.join(i for i in str(row["stop_id"]) if i.isdigit()) 
                     row['stop_ids'].append(pointid)
                     attributes[name] = row
+
                 if row['stop_id'] not in STIB_STOP_IDS:
                     STIB_STOP_IDS.append(row['stop_id'])
                 if row['line_id'] not in STIB_LINES:
                     STIB_LINES.append(row['line_id'])
+
     print(json.dumps(attributes))
     return attributes
 
@@ -264,7 +271,7 @@ def init(clean = False):
     return
 
 def setState(attribute):
-    key = "stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
+    key = "/stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
     print(key)
     state = {
                         "arrival": diff_in_minutes(attribute['passing_time'])
@@ -275,64 +282,70 @@ def setState(attribute):
     
     
 def setAttribute(attribute):
-    key = "stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
+    key = "/stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
     a = {                   
-                    "route_id": attribute["route_id"],
-                    "direction_id": attribute["direction_id"],
-                    "stop_id": attribute["stop_id"],
-                    "stop_name": attribute["stop_name"],
-                    "latitude": attribute["stop_lat"],
-                    "longitude": attribute["stop_lon"],
-                    "route_long_name": attribute["route_long_name"],
-                    "route_short_name": attribute["route_short_name"],
-                    "route_type": attribute["route_type"],
-                    "route_color": attribute["route_color"],
-                    "route_text_color": attribute["route_text_color"],
-                    "passing_time": attribute["passing_time"],
-                    "destination": attribute["destination"],
-                    "message": attribute["message"],
-                    "next_passing_time": attribute["next_passing_time"],
-                    "next_destination": attribute["next_destination"],
-                    "next_message": attribute["next_message"]
-    }                        
+        "route_id": attribute.get("route_id", "Unknown"),
+        "direction_id": attribute["direction_id"],
+        "stop_id": attribute["stop_id"],
+        "stop_name": attribute["stop_name"],
+        "latitude": attribute["stop_lat"],
+        "longitude": attribute["stop_lon"],
+        "route_long_name": attribute.get("route_long_name", "Unknown"),
+        "route_short_name": attribute["route_short_name"],
+        "route_type": attribute.get("route_type", "Unknown"),
+        "route_color": attribute.get("route_color", "Unknown"),
+        "route_text_color": attribute.get("route_text_color", "Unknown"),
+        "passing_time": attribute.get("passing_time", "Unknown"),
+        "destination": attribute.get("destination", "Unknown"),
+        "message": attribute.get("message", "Unknown"),
+        "next_passing_time": attribute.get("next_passing_time", "Unknown"),
+        "next_destination": attribute.get("next_destination", "Unknown"),
+        "next_message": attribute.get("next_message", "Unknown"),
+    }
+
     topic = TOPIC + key + "/attribute"
-    mqttSend(a,topic,False)
+    mqttSend(a, topic, False)
     return None
                     
 def setConfig(attribute):
-    key = "stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
+    key = "/stib" + attribute["stop_id"] + attribute["route_short_name"] + attribute["direction_id"] 
     config = {
-                "icon" : "",                        
-                "device_class": "duration",
-                "json_attributes_template": "{{value_json | default('') | to_json}}",
-                "json_attributes_topic": None,
-                "state_topic": None,
-                "command_topic": None,
-                "unique_id": None,
-                "unit_of_measurement": 'min',
-                "value_template": '{{value_json.arrival}}',
-                "device" : {}
-            }
+        "icon": "",
+        "device_class": "duration",
+        "json_attributes_template": "{{value_json | default('') | to_json}}",
+        "json_attributes_topic": None,
+        "state_topic": None,
+        "command_topic": None,
+        "unique_id": None,
+        "unit_of_measurement": 'min',
+        "value_template": '{{value_json.arrival}}',
+        "device": {}
+    }
+
     c = config.copy()
-    c.update(
-        {
-            "json_attributes_topic": TOPIC + key + "/attribute",
-            "state_topic": TOPIC + key + "/state",
-            "command_topic": TOPIC + key + "/set",
-            "unique_id": key,
-        }
-    )
     c.update({
-            "icon" : "mdi:" + attribute["route_type"].lower(),
-            "device" : {
-                "identifiers" : [key],
-                "name" : attribute["name"]
-            }
-            
+        "json_attributes_topic": TOPIC + key + "/attribute",
+        "state_topic": TOPIC + key + "/state",
+        "command_topic": TOPIC + key + "/set",
+        "unique_id": key,
     })
-    topic = TOPIC + key + "/config"
-    mqttSend(c,topic,True)
-    return 
+
+    if "route_type" in attribute:
+        c.update({
+            "icon": "mdi:" + attribute["route_type"].lower(),
+            "device": {
+                "identifiers": [key],
+                "name": attribute["name"]
+            }
+        })
+
+        topic = TOPIC + key + "/config"
+        mqttSend(c, topic, True)
+    else:
+        print(f"Warning: 'route_type' not found in attribute. Skipping MQTT configuration for {key}")
+
+    return
+
 def cleanMqtt():
     client = connect_mqtt()
     for stop in STIB_STOP_IDS:
